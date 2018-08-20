@@ -59,7 +59,10 @@ impl Chip8 {
         }
     }
 
-    pub fn initialize(&mut self, rom_path: &str) {
+    pub fn initialize(&mut self) {
+    }
+
+    pub fn load_rom(&mut self, rom_path: &str) {
         let mut rom = File::open(rom_path).unwrap();
         let mut i = 512;
 
@@ -68,36 +71,51 @@ impl Chip8 {
             i += 1;
         }
 
-        for (i, byte) in self.memory.iter() .enumerate() {
-            if *byte != 0 {
-                println!("{}: {}", i, byte);
-            }
+        //Print a small memory map for debugging purposes
+        for i in 512..550 {
+            println!("{}: {:#04X}", i, self.memory[i])
         }
+    }
+
+    fn read_opcode(&mut self) -> u16 {
+        //Grab the first half of the opcode as 2-byte, shifted 8 bits left
+        let opcode1: u16 = (self.memory[self.pc as usize] as u16) << 8;
+        //Grab second half of opcode as 2-byte
+        let opcode2: u16 = self.memory[(self.pc + 1) as usize] as u16;
+        //OR the two two-byte numbers (one "big end" and one "small end") to combine them
+        let opcode = opcode1 | opcode2;
+
+        opcode
     }
 
     pub fn emulate_cycle(&mut self) {
         //Fetch opcode
+        let opcode = self.read_opcode();
 
-        //Grab the first half of the opcode as 2-byte, shifted 8 bits left
-        let opcode1: u16 = (self.memory[self.pc as usize] as u16) << 8;
-        //Grab second half of opcode as 2-byte
-        let opcode2: u16 = self.memory[(self.pc+1) as usize] as u16;
-        //OR the two two-byte numbers (one "big end" and one "small end") to combine them
-        let opcode = opcode1 | opcode2;
+        //Print opcode as a 6-digit hex number, including leading zeros and "0x" notation.
+        println!("Opcode is {:#06X}", opcode); //ie 0x0012
 
-        println!("Final opcode is {:}", opcode); //Testing output
-
-        //decode and execute opcode
-        //our first hex digit (nibble) mask, 0xf000 is 61440 in decimal
+        //Decode and execute opcode
+        //Check our first hex digit (nibble)
         match opcode & FIRST_NIBBLE_MASK {
+            //0x0NNN opcodes
+            0x0000 => {
+                match opcode & FOURTH_NIBBLE_MASK {
+                    //0x0000 opcode (clear screen)
+                    0x0000 => { println!("Clear Screen") },
+                    //0x00EE opcode (return from sub-process)
+                    0x000E => { println!("Return") },
+                    _ => { println!("Unknown 0x000N opcode")}
+                }
+            },
             //0xANNN opcode (mv i, NNN)
-            40960 => {
+            0xA000 => {
                 self.i = opcode & LAST_THREE_MASK;  //4095 is 0x0fff in hex (our mask to grab xxx from above)
                 self.pc += 2;
-                println!("changing index address to {:}", self.i)
+                println!("Changing index to {:}d", self.i)
             },
-            //0xBNNN opcode (jump to location at NNN + V0)
-            45056 => {
+            //0xBNNN opcode (jmp NNN + V0)
+            0xB000 => {
                 self.pc = (opcode & LAST_THREE_MASK) + self.v[0] as u16;
 
             }
@@ -124,7 +142,8 @@ fn main() {
     //Create and initialize our Chip8 object
     let mut chip8 = Chip8::new();
 
-    chip8.initialize("foo.rom");
+    chip8.initialize();
+    chip8.load_rom("foo.rom");
 
     //Manually load in some opcodes for testing
     //Program memory starts at address 512 (0x200)
@@ -132,7 +151,7 @@ fn main() {
     chip8.memory[513] = 35;  //23 in Hex*/
 
     //Our memory now contains [A1, 23]. This is the opcode A123.
-    //This is the opcode for "move instruction pointer to address 0x123" (0xANNN, where NNN is the address)
+    //This is the opcode for "load index with address 0x123" (0xANNN, where NNN is the address)
 
     //Emulate a CPU cycle
     chip8.emulate_cycle();
