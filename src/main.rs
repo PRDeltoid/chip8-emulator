@@ -16,12 +16,12 @@ use std::io;
 use std::io::prelude::*;
 use std::fs::File;
 
-const FIRST_NIBBLE_MASK: u16 = 61440;  //0xF000, grabs first nibble only
-const SECOND_NIBBLE_MASK: u16 = 3840;  //0x0F00, grabs second nibble only
-const THIRD_NIBBLE_MASK: u16 = 240;    //0x00F0, ...
-const FOURTH_NIBBLE_MASK: u16 = 15;    //0x000F, ...
+const FIRST_NIBBLE_MASK: u16 = 0xF000;  //Grabs first nibble only
+const SECOND_NIBBLE_MASK: u16 = 0x0F00; //Grabs second nibble only
+const THIRD_NIBBLE_MASK: u16 = 0x00F0;
+const FOURTH_NIBBLE_MASK: u16 = 0x000F;
 
-const LAST_THREE_MASK: u16 = 4095;     //0x0FFF, grabs last three nibbles only
+const LAST_THREE_MASK: u16 = 0x0FFF;    //Grabs last three nibbles only
 
 pub struct Chip8 {
     opcode: u16,        //Opcode
@@ -124,7 +124,7 @@ fn main() {
     //Create and initialize our Chip8 object
     let mut chip8 = Chip8::new();
 
-    chip8.initialize("pong.rom");
+    chip8.initialize("foo.rom");
 
     //Manually load in some opcodes for testing
     //Program memory starts at address 512 (0x200)
