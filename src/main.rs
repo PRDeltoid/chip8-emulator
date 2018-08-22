@@ -11,6 +11,8 @@ We then bitwise OR our 2 byte number and our 1-byte number that we want to combi
 
 Rust does not allow Hex literals in code, so most hex will be converted to decimal before being entered.
 Their decimal equivalence and purpose should be noted in the comments or via constants
+
+To extract nibbles as individual numbers, we mask the nibble and then rotate that nibble to the right until it is in the "1"s place
 ************/
 use std::io::prelude::*;
 use std::fs::File;
@@ -64,6 +66,11 @@ impl Chip8 {
     pub fn initialize(&mut self) {
     }
 
+    //Increments the program counter to pull the next opcode
+    fn next_instruction(&mut self) {
+        self.pc += 2;
+    }
+
     pub fn load_rom(&mut self, rom_path: &str) {
         let rom = File::open(rom_path).unwrap();
         let mut i = 512;
@@ -73,10 +80,10 @@ impl Chip8 {
             i += 1;
         }
 
-        //Print a small memory map for debugging purposes
+        /*Print a small memory map for debugging purposes
         for i in 512..550 {
             println!("{}: {:#04X}", i, self.memory[i])
-        }
+        }*/
     }
 
     fn read_opcode(&mut self) -> u16 {
@@ -95,7 +102,7 @@ impl Chip8 {
         let opcode = self.read_opcode();
 
         //Print opcode as a 6-digit hex number, including leading zeros and "0x" notation.
-        println!("Opcode is {:#06X}", opcode); //ie 0x0012
+        println!("Opcode: {:#06X}", opcode); //ie 0x0012
 
         //Decode and execute opcode
         //Check our first hex digit (nibble)
@@ -104,9 +111,9 @@ impl Chip8 {
             0x0000 => {
                 match opcode & FOURTH_NIBBLE_MASK {
                     //0x0000 opcode (clear screen)
-                    0x0000 => { println!("Clear Screen") },
+                    0x0000 => { println!("Clear Screen"); self.next_instruction() },
                     //0x00EE opcode (return from sub-process)
-                    0x000E => { println!("Return") },
+                    0x000E => { println!("Return"); self.next_instruction() },
                     _ => { println!("Unknown 0x000N opcode")}
                 }
             },
@@ -124,46 +131,56 @@ impl Chip8 {
             },
             //0x3XKK opcode (Skp next instruction if Vx == kk)
             0x3000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
                 if self.v[x] == kk {
                     //Skip next instruction by adding 2 to the program counter (skipping 2 bytes or 1 opcode)
-                    self.pc += 2;
+                    self.next_instruction();
                 }
+                self.next_instruction();
+                println!("SE V[{}], {}", x, kk)
             },
             //0x4XKK opcode (Skp next instruction if Vx != kk)
             0x4000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
                 if self.v[x] != kk {
                     //Skip next instruction by adding 2 to the program counter (skipping 2 bytes or 1 opcode)
-                    self.pc += 2;
+                    self.next_instruction();
                 }
+                self.next_instruction();
+                println!("SNE V[{}], {}", x, kk)
             },
             //0x5XY0 (Skp next instruction if Vx == Vy)
             0x5000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
-                let y = (opcode & THIRD_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
                 if self.v[x] == self.v[y] {
-                    self.pc += 2;
+                    self.next_instruction();
                 }
+                self.next_instruction();
+                println!("SE V[{}], V[{}]", x, y)
             },
             //0x6XKK (Load Vx with kk)
             0x6000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
                 self.v[x] = kk;
+                println!("Load V[{}] with {}", x, kk);
+                self.next_instruction();
             },
             //0x7XKK (Add Vx, kk)
             0x7000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
                 self.v[x] += kk;
+                self.next_instruction();
             },
             //0x8XYN (Vx/Vy operations)
             0x8000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
-                let y = (opcode & THIRD_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
+                println!("X: {}, Y: {}", x, y );
                 match opcode & FOURTH_NIBBLE_MASK  {
                     //0x8XY0 (MOV v[x], v[y])
                     0x0000 => {
@@ -202,8 +219,11 @@ impl Chip8 {
                     },
                     //0x8XY6 (SHR v[x], 1)
                     0x0006 => {
+                        //If Most Significant Bit is 1, set VF to 1
+                        if(opcode & 0b1000_0000) == 0b1000_0000 {
+                            self.vf = 1;
+                        }
                         self.v[x] = self.v[x] >> 1;
-                        //Need to set VF if least-significant bit is 1
                     },
                     //0x8XY7 (SUBN v[x], v[y])
                     0x0007 => {
@@ -216,52 +236,82 @@ impl Chip8 {
                     },
                     //0x8XY6 (SHL v[x], 1)
                     0x000E => {
+                        //If Least Significant Bit is 1, set VF to 1
+                        if (opcode & 0b0000_0001) == 0b0000_0001 {
+                            self.vf = 1;
+                        }
                         self.v[x] = self.v[x] << 1;
-                        //Need to set VF if most-significant bit is 1.
                     },
-                    _ => {},
+                    _ => { println!("Unknown 0x800N opcode")}
                 }
+                //None of the 8NNN opcodes affect the PC, so we can increment it at the end no matter what
+                self.next_instruction();
             },
             //0x9XY0 (Skip next instruction if Vx != Vy
             0x9000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
-                let y = (opcode & THIRD_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
                 if self.v[x] != self.v[y] {
-                    self.pc += 2;
+                    self.next_instruction();
                 }
+                self.next_instruction();
             },
             //0xANNN opcode (mv i, NNN)
             0xA000 => {
                 self.i = opcode & LAST_THREE_MASK;
-                self.pc += 2;
+                self.next_instruction();
                 println!("Changing index to {:}d", self.i)
             },
             //0xBNNN opcode (jmp NNN + V0)
             0xB000 => {
                 self.pc = (opcode & LAST_THREE_MASK) + self.v[0] as u16;
-
+            }
+            //0xDxyn opcode
+            0xD000 => {
+                println!("Display Opcode");
+                self.next_instruction();
             }
             //0xFXNN opcodes
             0xF000 => {
-                let x = (opcode & SECOND_NIBBLE_MASK) as usize;
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 match opcode & LAST_TWO_MASK  {
                     //0xFX07 (mv v[x], delay_timer)
                     0x0007 => {
                         self.v[x] = self.delay_timer;
+                        self.next_instruction();
                     },
                     //0xFX15 (mov delay_timer, v[x])
                     0x0015 => {
                         self.delay_timer  = self.v[x];
+                        self.next_instruction();
                     },
                     //0xFX18 (mov sound_timer, v[x])
                     0x0018 => {
                         self.sound_timer = self.v[x];
+                        self.next_instruction();
                     },
                     //0xFX1E (add i, v[x])
                     0x001E => {
                         self.i += self.v[x] as u16;
+                        self.next_instruction();
                     },
-                    _ => {},
+                    0x0029 => {
+                        println!("Set I = location of sprit for digit Vx");
+                        self.next_instruction();
+                    },
+                    0x0033 => {
+                        println!("Store BCD of Vx in memory at location i, i+1, i+2");
+                        self.next_instruction();
+                    },
+                    0x0055 => {
+                        println!("Stores registers V0 through Vx in memory starting at location I");
+                        self.next_instruction();
+                    },
+                    0x0065 => {
+                        println!("Read registers V0 through Vx from memory starting at location I");
+                        self.next_instruction();
+                    },
+                    _ => { println!("Unknown 0xF0NN opcode")},
                 }
             }
             _ => {
@@ -288,7 +338,7 @@ fn main() {
     let mut chip8 = Chip8::new();
 
     chip8.initialize();
-    chip8.load_rom("foo.rom");
+    chip8.load_rom("pong.rom");
 
     //Manually load in some opcodes for testing
     //Program memory starts at address 512 (0x200)
@@ -298,6 +348,8 @@ fn main() {
     //Our memory now contains [A1, 23]. This is the opcode A123.
     //This is the opcode for "load index with address 0x123" (0xANNN, where NNN is the address)
 
-    //Emulate a CPU cycle
-    chip8.emulate_cycle();
+    while(chip8.pc < 4096) {
+        //Emulate a CPU cycle
+        chip8.emulate_cycle();
+    }
 }

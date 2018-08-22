@@ -1,4 +1,4 @@
 [[package]]
-name = "CHIP8"
+name = "chip8"
 version = "0.1.0"
 

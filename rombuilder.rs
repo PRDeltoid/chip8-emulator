@@ -3,8 +3,8 @@ use std::io::prelude::*;
 use std::str;
 
 fn main() {
-    let file = File::create("foo.rom").unwrap();
-    let memory = [0x12, 0x34];
+    let mut file = File::create("foo.rom").unwrap();
+    let memory = [0x81, 0x26];
 
     file.write_all(&memory);
 }
