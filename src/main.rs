@@ -18,6 +18,10 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::ops::Range;
 
+mod screen;
+
+use screen::Screen;
+
 const FIRST_NIBBLE_MASK: u16 = 0xF000;  //Grabs first nibble only
 const SECOND_NIBBLE_MASK: u16 = 0x0F00; //Grabs second nibble only
 const THIRD_NIBBLE_MASK: u16 = 0x00F0;
@@ -35,7 +39,9 @@ pub struct Chip8 {
     i: u16,             //Index register
     pc: u16,            //Program counter (instruction pointer)
 
-    _screen: [u8; 64 * 32], //Array for storing screen pixels. Screen is 64 x 32 pixels
+    screen: [u8; 64 * 32], //Array for storing screen pixels. Screen is 64 x 32 pixels
+    draw_screen: Screen,
+    draw_flag: bool,
 
     delay_timer: u8,    //Counts down at 60Hz speed to zero
     sound_timer: u8,    //Same as above, system buzzer sounds when it reaches zero
@@ -55,7 +61,9 @@ impl Chip8 {
             vf: 0,
             i: 0,
             pc: 512,           //program counter starts at 0x200 (system data comes before)
-            _screen: [0; 64 * 32],
+            screen: [0; 64 * 32],
+            draw_screen: Screen::new(),
+            draw_flag: false,
             delay_timer: 0,
             sound_timer: 0,
             stack: [0; 16],
@@ -113,6 +121,10 @@ impl Chip8 {
         let opcode = opcode1 | opcode2;
 
         opcode
+    }
+
+    fn draw(&mut self) {
+        self.draw_screen.draw(&self.screen)
     }
 
     //Pulls the current opcode in memory (at program counter) and performs it's required operations
@@ -300,7 +312,37 @@ impl Chip8 {
             }
             //0xDxyn opcode
             0xD000 => {
-                println!("Display Opcode");
+                println!("Draw Sprite");
+                //X Coord to draw at
+                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                //Y Coord to draw at
+                let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
+                //line height of the sprite (width is ALWAYS 8)
+                let height = (opcode & FOURTH_NIBBLE_MASK) as usize;
+
+                //Holds the current pixel data
+                let mut pixel: u8;
+
+                //For each line in the sprite from 0 to the sprite's height
+                for yline in 0..height {
+                    //Grab our sprite's 8-bit pixel line at this spot
+                    pixel = self.memory[self.i as usize + yline];
+                    //For each pixel (bit) in the line... (always width of 8, remember!)
+                    for xline in 0..8 {
+                        //If the current bit is set...
+                        if (pixel & 0x08 >> xline) != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
+                            //Check for pixel collision
+                            if self.screen[x + xline + ((y + yline) * 64)] == 1 {
+                                //If there is a collision, set the collision register to true
+                                self.v[0xF] = 1;
+                            }
+                            //Set the value of the line by XORing our sprite's current line onto it
+                            self.screen[x + xline + ((y + yline) * 64)] ^= 1;
+                        }
+                    }
+                }
+                //Tell the screen that it has to refresh after this operation
+                self.draw_flag = true;
                 self.next_instruction();
             }
             //0xFXNN opcodes
@@ -328,19 +370,31 @@ impl Chip8 {
                         self.next_instruction();
                     },
                     0x0029 => {
-                        println!("Set I = location of sprit for digit Vx");
+                        println!("Set I = location of sprite for digit Vx");
                         self.next_instruction();
                     },
                     0x0033 => {
                         println!("Store BCD of Vx in memory at location i, i+1, i+2");
+                        //Take each numbers place in V[x] and separate them to store in separate memory locations
+                        let bcd = self.v[x];
+                        self.memory[self.i as usize] = bcd / 100;
+                        self.memory[self.i as usize + 1] = (bcd / 10) % 10;
+                        self.memory[self.i as usize + 2] = (bcd % 100) % 10;
+
                         self.next_instruction();
                     },
                     0x0055 => {
                         println!("Stores registers V0 through Vx in memory starting at location I");
+                        for n in 0..x {
+                           self.memory[self.i as usize + n] = self.v[n];
+                        }
                         self.next_instruction();
                     },
                     0x0065 => {
                         println!("Read registers V0 through Vx from memory starting at location I");
+                        for n in 0..x {
+                            self.v[n] = self.memory[self.i as usize + n];
+                        }
                         self.next_instruction();
                     },
                     _ => { println!("Unknown 0xF0NN opcode")},
@@ -359,8 +413,14 @@ impl Chip8 {
         if self.sound_timer > 0 {
             if self.sound_timer == 1 {
                 //Make a beep noise
+                println!("BEEP!");
             }
             self.sound_timer -= 1;
+        }
+
+        if self.draw_flag == true {
+            self.draw();
+            //Draw the screen
         }
     }
 
