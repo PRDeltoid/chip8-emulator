@@ -16,6 +16,7 @@ To extract nibbles as individual numbers, we mask the nibble and then rotate tha
 ************/
 use std::io::prelude::*;
 use std::fs::File;
+use std::ops::Range;
 
 const FIRST_NIBBLE_MASK: u16 = 0xF000;  //Grabs first nibble only
 const SECOND_NIBBLE_MASK: u16 = 0x0F00; //Grabs second nibble only
@@ -71,6 +72,22 @@ impl Chip8 {
         self.pc += 2;
     }
 
+    //Loads font sprites into memory starting at location 0x0000 to 0x01FF
+    pub fn load_font(&mut self, font_path: &str) {
+        let font = File::open(font_path).unwrap();
+        let mut i = 0;
+
+        for byte in font.bytes() {
+            self.memory[i] = byte.unwrap();
+            i += 1;
+            //Prevent malformed font file from overwriting program data
+            if i >= 512 { break; }
+        }
+
+
+    }
+
+    //Loads a ROM into memory starting at location 0x0200
     pub fn load_rom(&mut self, rom_path: &str) {
         let rom = File::open(rom_path).unwrap();
         let mut i = 512;
@@ -86,6 +103,7 @@ impl Chip8 {
         }*/
     }
 
+    //Reads two bytes from memory and combines them into a single opcode number
     fn read_opcode(&mut self) -> u16 {
         //Grab the first half of the opcode as 2-byte, shifted 8 bits left
         let opcode1: u16 = (self.memory[self.pc as usize] as u16) << 8;
@@ -97,6 +115,7 @@ impl Chip8 {
         opcode
     }
 
+    //Pulls the current opcode in memory (at program counter) and performs it's required operations
     pub fn emulate_cycle(&mut self) {
         //Fetch opcode
         let opcode = self.read_opcode();
@@ -111,9 +130,18 @@ impl Chip8 {
             0x0000 => {
                 match opcode & FOURTH_NIBBLE_MASK {
                     //0x0000 opcode (clear screen)
-                    0x0000 => { println!("Clear Screen"); self.next_instruction() },
+                    0x0000 => {
+                        println!("Clear Screen");
+                        self.next_instruction();
+                    },
                     //0x00EE opcode (return from sub-process)
-                    0x000E => { println!("Return"); self.next_instruction() },
+                    0x000E => {
+                        //Set program counter to the address at the top of the stack
+                        self.pc = self.stack[self.sp as usize];
+                        //Move the stack pointer down one to "pop" the previous stack information
+                        self.sp -= 1;
+                        println!("Return");
+                    },
                     _ => { println!("Unknown 0x000N opcode")}
                 }
             },
@@ -124,8 +152,11 @@ impl Chip8 {
             },
             //0x2NNN opcode (call subroutine: push pc to stack, jmp nnn)
             0x2000 => {
+                //Move stack pointer up one because we are "pushing" data in
                 self.sp += 1;
+                //Push the current program counter into the stack at the "top"
                 self.stack[self.sp as usize] = self.pc;
+                //Jump to address NNN
                 self.pc = opcode & LAST_THREE_MASK;
                 println!("Jumping to {:}d", self.pc);
             },
@@ -174,13 +205,14 @@ impl Chip8 {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
                 self.v[x] += kk;
+                println!("Add V[{}] with {}", x, kk);
                 self.next_instruction();
             },
             //0x8XYN (Vx/Vy operations)
             0x8000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
-                println!("X: {}, Y: {}", x, y );
+                //println!("X: {}, Y: {}", x, y );
                 match opcode & FOURTH_NIBBLE_MASK  {
                     //0x8XY0 (MOV v[x], v[y])
                     0x0000 => {
@@ -331,24 +363,29 @@ impl Chip8 {
             self.sound_timer -= 1;
         }
     }
+
+    //Print the bytes in memory between the given range (for debugging purposes)
+    pub fn print_memory(&self, range: Range<usize>) {
+        for i in range {
+            println!("{:#04X}", self.memory[i]);
+        }
+    }
 }
 
 fn main() {
     //Create and initialize our Chip8 object
     let mut chip8 = Chip8::new();
-
     chip8.initialize();
+
+    //Load up our font into reserved system memory
+    chip8.load_font("font.c8");
+    //chip8.print_memory(0..100); //Check to see if the fonts are loaded
+
+    //Load up our ROM into program memory
     chip8.load_rom("pong.rom");
 
-    //Manually load in some opcodes for testing
-    //Program memory starts at address 512 (0x200)
-    /*chip8.memory[512] = 161; //A1 in Hex
-    chip8.memory[513] = 35;  //23 in Hex*/
-
-    //Our memory now contains [A1, 23]. This is the opcode A123.
-    //This is the opcode for "load index with address 0x123" (0xANNN, where NNN is the address)
-
-    while(chip8.pc < 4096) {
+    //While the program counter is within an acceptable range...
+    while chip8.pc < 4096 {
         //Emulate a CPU cycle
         chip8.emulate_cycle();
     }
