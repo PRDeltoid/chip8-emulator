@@ -329,8 +329,6 @@ impl Chip8 {
 
                 //Unset our collision flag
                 self.v[0x0F] == 0;
-                //Unset our draw flag
-                self.draw_flag = false;
 
                 println!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
 
@@ -441,6 +439,9 @@ impl Chip8 {
             //Draw the screen
             println!("Draw Screen");
             self.draw();
+
+            //Unset our draw flag for the next op
+            self.draw_flag = false;
         }
 
     }
