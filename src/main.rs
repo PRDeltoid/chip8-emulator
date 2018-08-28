@@ -14,9 +14,12 @@ Their decimal equivalence and purpose should be noted in the comments or via con
 
 To extract nibbles as individual numbers, we mask the nibble and then rotate that nibble to the right until it is in the "1"s place
 ************/
+extern crate piston_window;
+
 use std::io::prelude::*;
 use std::fs::File;
 use std::ops::Range;
+use std::io::{stdin, stdout, Read, Write};
 
 mod screen;
 
@@ -62,7 +65,7 @@ impl Chip8 {
             i: 0,
             pc: 512,           //program counter starts at 0x200 (system data comes before)
             screen: [0; 64 * 32],
-            draw_screen: Screen::new(),
+            draw_screen: Screen::new(64, 32, 8.0),
             draw_flag: false,
             delay_timer: 0,
             sound_timer: 0,
@@ -124,7 +127,11 @@ impl Chip8 {
     }
 
     fn draw(&mut self) {
-        self.draw_screen.draw(&self.screen)
+        self.draw_screen.draw(&self.screen);
+    }
+
+    fn clear(&mut self) {
+        self.draw_screen.clear();
     }
 
     //Pulls the current opcode in memory (at program counter) and performs it's required operations
@@ -144,15 +151,16 @@ impl Chip8 {
                     //0x0000 opcode (clear screen)
                     0x0000 => {
                         println!("Clear Screen");
+                        self.clear();
                         self.next_instruction();
                     },
                     //0x00EE opcode (return from sub-process)
                     0x000E => {
+                        println!("Return");
                         //Set program counter to the address at the top of the stack
                         self.pc = self.stack[self.sp as usize];
                         //Move the stack pointer down one to "pop" the previous stack information
                         self.sp -= 1;
-                        println!("Return");
                     },
                     _ => { println!("Unknown 0x000N opcode")}
                 }
@@ -312,13 +320,19 @@ impl Chip8 {
             }
             //0xDxyn opcode
             0xD000 => {
-                println!("Draw Sprite");
                 //X Coord to draw at
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 //Y Coord to draw at
                 let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
                 //line height of the sprite (width is ALWAYS 8)
                 let height = (opcode & FOURTH_NIBBLE_MASK) as usize;
+
+                //Unset our collision flag
+                self.v[0x0F] == 0;
+                //Unset our draw flag
+                self.draw_flag = false;
+
+                println!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
 
                 //Holds the current pixel data
                 let mut pixel: u8;
@@ -333,7 +347,7 @@ impl Chip8 {
                         if (pixel & 0x08 >> xline) != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
                             //Check for pixel collision
                             if self.screen[x + xline + ((y + yline) * 64)] == 1 {
-                                //If there is a collision, set the collision register to true
+                                //If there is a collision, set the collision register VF to 1
                                 self.v[0xF] = 1;
                             }
                             //Set the value of the line by XORing our sprite's current line onto it
@@ -344,6 +358,11 @@ impl Chip8 {
                 //Tell the screen that it has to refresh after this operation
                 self.draw_flag = true;
                 self.next_instruction();
+
+                //Print screen memory for debugging purposes
+                for i in 0..100 {
+                    println!("Screen[{}] = {}", i, self.screen[i])
+                }
             }
             //0xFXNN opcodes
             0xF000 => {
@@ -419,9 +438,11 @@ impl Chip8 {
         }
 
         if self.draw_flag == true {
-            self.draw();
             //Draw the screen
+            println!("Draw Screen");
+            self.draw();
         }
+
     }
 
     //Print the bytes in memory between the given range (for debugging purposes)
@@ -430,6 +451,14 @@ impl Chip8 {
             println!("{:#04X}", self.memory[i]);
         }
     }
+}
+
+//Simple system("pause") equivalent in Rust.
+fn pause() {
+    let mut stdout = stdout();
+    stdout.write(b"Press Enter to continue...").unwrap();
+    stdout.flush().unwrap();
+    stdin().read(&mut [0]).unwrap();
 }
 
 fn main() {
@@ -442,11 +471,14 @@ fn main() {
     //chip8.print_memory(0..100); //Check to see if the fonts are loaded
 
     //Load up our ROM into program memory
-    chip8.load_rom("pong.rom");
+    chip8.load_rom("testrom.c8");
 
     //While the program counter is within an acceptable range...
     while chip8.pc < 4096 {
         //Emulate a CPU cycle
         chip8.emulate_cycle();
+        //Pause after execution to observe the state of the screen
+        pause();
     }
+
 }
