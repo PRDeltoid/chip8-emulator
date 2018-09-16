@@ -1,2 +1,4 @@
 /target
 **/*.rs.bk
+/.idea
+chip8-emulator.iml

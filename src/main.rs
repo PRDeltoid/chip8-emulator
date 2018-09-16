@@ -15,15 +15,14 @@ Their decimal equivalence and purpose should be noted in the comments or via con
 To extract nibbles as individual numbers, we mask the nibble and then rotate that nibble to the right until it is in the "1"s place
 ************/
 extern crate piston_window;
+extern crate rand;
 
 use std::io::prelude::*;
 use std::fs::File;
 use std::ops::Range;
 use std::io::{stdin, stdout, Read, Write};
 
-mod screen;
-
-use screen::Screen;
+use piston_window::*;
 
 const FIRST_NIBBLE_MASK: u16 = 0xF000;  //Grabs first nibble only
 const SECOND_NIBBLE_MASK: u16 = 0x0F00; //Grabs second nibble only
@@ -43,7 +42,7 @@ pub struct Chip8 {
     pc: u16,            //Program counter (instruction pointer)
 
     screen: [u8; 64 * 32], //Array for storing screen pixels. Screen is 64 x 32 pixels
-    draw_screen: Screen,
+    //draw_screen: Screen,
     draw_flag: bool,
 
     delay_timer: u8,    //Counts down at 60Hz speed to zero
@@ -65,7 +64,6 @@ impl Chip8 {
             i: 0,
             pc: 512,           //program counter starts at 0x200 (system data comes before)
             screen: [0; 64 * 32],
-            draw_screen: Screen::new(64, 32, 8.0),
             draw_flag: false,
             delay_timer: 0,
             sound_timer: 0,
@@ -126,16 +124,37 @@ impl Chip8 {
         opcode
     }
 
-    fn draw(&mut self) {
-        self.draw_screen.draw(&self.screen);
+    fn draw(&mut self, window: &mut PistonWindow, event: &Event) {
+        let pixel_size = 8.0; // self.pixel_size as f64;
+        let y_size = 32; //self.y_size as usize;
+        let x_size = 64; //self.x_size as usize;
+        window.draw_2d(event, |c, g| {
+
+            //Step over each x "pixel"
+            for x in 0..x_size as usize {
+                //Step over each y "pixel" for each x above
+                for y in 0..y_size as usize {
+                    //If the screen contains a 1 at the current pixel...
+                    if self.screen[x + (y * x_size as usize)] == 1 {
+                        let x_pos = x as f64 * pixel_size;
+                        let y_pos = y as f64 * pixel_size;
+                        println!("Drawing rect at x:{}, y:{}", x_pos, y_pos);
+                        Rectangle::new([1.0, 1.0, 1.0, 1.0])
+                            .draw([x_pos, y_pos, pixel_size, pixel_size], &c.draw_state, c.transform, g)
+                    }
+                }
+            }
+        });
     }
 
-    fn clear(&mut self) {
-        self.draw_screen.clear();
+    fn clear(&mut self, window: &mut PistonWindow, event: &Event) {
+        window.draw_2d(event, |_context, graphics| {
+            clear(color::BLACK, graphics);
+        });
     }
 
     //Pulls the current opcode in memory (at program counter) and performs it's required operations
-    pub fn emulate_cycle(&mut self) {
+    pub fn emulate_cycle(&mut self, window: &mut PistonWindow, event: &Event) {
         //Fetch opcode
         let opcode = self.read_opcode();
 
@@ -151,7 +170,7 @@ impl Chip8 {
                     //0x0000 opcode (clear screen)
                     0x0000 => {
                         println!("Clear Screen");
-                        self.clear();
+                        self.clear(window, event);
                         self.next_instruction();
                     },
                     //0x00EE opcode (return from sub-process)
@@ -317,32 +336,43 @@ impl Chip8 {
             //0xBNNN opcode (jmp NNN + V0)
             0xB000 => {
                 self.pc = (opcode & LAST_THREE_MASK) + self.v[0] as u16;
+            },
+            //0xCXNN opcode (rnd Vx, byte AND NN)
+            0xC000 => {
+                let x = (opcode & SECOND_NIBBLE_MASK) >> 8;
+                let n = opcode & LAST_TWO_MASK;
+                let rand = rand::random::<u16>();
+
+                println!("n: {}, x: {}, rand: {}", n, x, rand);
+                self.v[x as usize] = (rand & n) as u8;
+                self.next_instruction();
+
             }
             //0xDxyn opcode
             0xD000 => {
                 //X Coord to draw at
-                let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                let x = self.v[((opcode & SECOND_NIBBLE_MASK) >> 8) as usize] as usize;
                 //Y Coord to draw at
-                let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
+                let y = self.v[((opcode & THIRD_NIBBLE_MASK) >> 4) as usize] as usize;
                 //line height of the sprite (width is ALWAYS 8)
                 let height = (opcode & FOURTH_NIBBLE_MASK) as usize;
 
                 //Unset our collision flag
-                self.v[0x0F] == 0;
+                self.v[0x0F] = 0;
 
                 println!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
 
                 //Holds the current pixel data
-                let mut pixel: u8;
+                let mut pixel_line: u8;
 
                 //For each line in the sprite from 0 to the sprite's height
                 for yline in 0..height {
                     //Grab our sprite's 8-bit pixel line at this spot
-                    pixel = self.memory[self.i as usize + yline];
+                    pixel_line = self.memory[self.i as usize + yline];
                     //For each pixel (bit) in the line... (always width of 8, remember!)
                     for xline in 0..8 {
                         //If the current bit is set...
-                        if (pixel & 0x08 >> xline) != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
+                        if (pixel_line >> xline) & 0b00000001 != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
                             //Check for pixel collision
                             if self.screen[x + xline + ((y + yline) * 64)] == 1 {
                                 //If there is a collision, set the collision register VF to 1
@@ -356,12 +386,26 @@ impl Chip8 {
                 //Tell the screen that it has to refresh after this operation
                 self.draw_flag = true;
                 self.next_instruction();
+            },
+            //0xE0NN opcodes
+            0xE000 => {
+                match opcode & LAST_TWO_MASK {
+                    //0xEx9E Skip next instruct if key with value of Vx is pressed
+                    0x009E => {
+                        let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
+                        println!("x : {}", x);
+                    },
+                    //0xEx9E Skip next instruct if key with value of Vx is not pressed
+                    0x00A1 => {
+                        let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
+                        println!("x : {}", x);
 
-                //Print screen memory for debugging purposes
-                for i in 0..100 {
-                    println!("Screen[{}] = {}", i, self.screen[i])
+                    },
+                    _ => {
+                        println!("Unknown opcode found");
+                    }
                 }
-            }
+            },
             //0xFXNN opcodes
             0xF000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
@@ -370,6 +414,12 @@ impl Chip8 {
                     0x0007 => {
                         self.v[x] = self.delay_timer;
                         self.next_instruction();
+                    },
+                    //Wait for key press, store value of key in Vx
+                    //All execution stops until a key is pressed
+                    0x000A => {
+                        let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
+                        println!("x : {}", x);
                     },
                     //0xFX15 (mov delay_timer, v[x])
                     0x0015 => {
@@ -438,7 +488,7 @@ impl Chip8 {
         if self.draw_flag == true {
             //Draw the screen
             println!("Draw Screen");
-            self.draw();
+            self.draw(window, event);
 
             //Unset our draw flag for the next op
             self.draw_flag = false;
@@ -463,6 +513,19 @@ fn pause() {
 }
 
 fn main() {
+    let height: u32 = 64 * 8; //x_size as u32 * pixel_size as u32;
+    let width: u32 = 32 * 8; //y_size as u32 * pixel_size as u32;
+
+    let mut window: PistonWindow = WindowSettings::new(
+        "Chip8",
+        [height, width]
+    )
+    .exit_on_esc(true)
+    .build()
+    .unwrap();
+
+    window.set_lazy(false);
+
     //Create and initialize our Chip8 object
     let mut chip8 = Chip8::new();
     chip8.initialize();
@@ -472,14 +535,18 @@ fn main() {
     //chip8.print_memory(0..100); //Check to see if the fonts are loaded
 
     //Load up our ROM into program memory
-    chip8.load_rom("testrom.c8");
+    chip8.load_rom("maze.ch8");
 
-    //While the program counter is within an acceptable range...
-    while chip8.pc < 4096 {
+    while let Some(e) = window.next() {
+        //While the program counter is within an acceptable range...
+        if chip8.pc > 4096 {
+            println!("Accessing invalid memory, aborting");
+            return;
+        }
         //Emulate a CPU cycle
-        chip8.emulate_cycle();
+        chip8.emulate_cycle(&mut window, &e);
         //Pause after execution to observe the state of the screen
-        pause();
+        //pause();
     }
 
 }
