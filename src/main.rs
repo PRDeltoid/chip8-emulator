@@ -176,11 +176,12 @@ impl Chip8 {
                     },
                     //0x00EE opcode (return from sub-process)
                     0x000E => {
-                        println!("Returning to {}", self.stack[self.sp as usize]);
+                        println!("Returning to {:#06X}", self.stack[self.sp as usize]);
                         //Set program counter to the address at the top of the stack
                         self.pc = self.stack[self.sp as usize];
                         //Move the stack pointer down one to "pop" the previous stack information
                         self.sp -= 1;
+                        self.next_instruction()
                     },
                     _ => { println!("Unknown 0x000N opcode")}
                 }
@@ -188,17 +189,17 @@ impl Chip8 {
             //0x1NNN opcode (jmp nnn)
             0x1000 => {
                 self.pc = opcode & LAST_THREE_MASK;
-                println!("Jumping to {:}d", self.pc);
+                println!("Jumping to {:#06X}", self.pc);
             },
             //0x2NNN opcode (call subroutine: push pc to stack, jmp nnn)
             0x2000 => {
-                println!("Call routine at {:#04X}", self.pc);
                 //Move stack pointer up one because we are "pushing" data in
                 self.sp += 1;
                 //Push the current program counter into the stack at the "top"
                 self.stack[self.sp as usize] = self.pc;
                 //Jump to address NNN
                 self.pc = opcode & LAST_THREE_MASK;
+                println!("Call routine at {:#06X}", self.pc-512);
             },
             //0x3XKK opcode (Skp next instruction if Vx == kk)
             0x3000 => {
@@ -243,9 +244,10 @@ impl Chip8 {
             //0x7XKK (Add Vx, kk)
             0x7000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
-                let kk = (opcode & LAST_TWO_MASK) as u8;
-                println!("Add V[{}] with {}", x, kk);
-                self.v[x] += kk;
+                let kk = (opcode & LAST_TWO_MASK) as u16;
+                println!("Add V[{}] ({}) with {}", x, self.v[x], kk);
+                //Add and keep only the last byte by masking.
+                self.v[x] = (((self.v[x] as u16) + kk) & 0x00FF) as u8;
                 self.next_instruction();
             },
             //0x8XYN (Vx/Vy operations)
@@ -373,7 +375,7 @@ impl Chip8 {
                 //Unset our collision flag
                 self.v[0x0F] = 0;
 
-                print!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
+                println!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
 
                 //Holds the current pixel data
                 let mut pixel_line: u8;
@@ -412,14 +414,21 @@ impl Chip8 {
                 match opcode & LAST_TWO_MASK {
                     //0xEx9E Skip next instruct if key with value of Vx is pressed
                     0x009E => {
-                        let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
+                        let x = ((opcode & THIRD_NIBBLE_MASK) >> 8) as usize;
                         println!("SN if Key[{}] is pressed", x);
+                        if self.key[x] == 1 {
+                            self.next_instruction();
+                        }
+                        self.next_instruction();
                     },
                     //0xEx9E Skip next instruct if key with value of Vx is not pressed
                     0x00A1 => {
-                        let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
+                        let x = ((opcode & THIRD_NIBBLE_MASK) >> 8) as usize;
                         println!("SN if Key[{}] is not pressed", x);
-
+                        if self.key[x] == 0 {
+                            self.next_instruction();
+                        }
+                        self.next_instruction();
                     },
                     _ => {
                         println!("Unknown 0xE000 opcode");
@@ -583,7 +592,7 @@ fn main() {
     chip8.load_font("font.c8");
 
     //Load up our ROM into program memory
-    chip8.load_rom("Maze.ch8");
+    chip8.load_rom("TetrisDemo.ch8");
 
     while let Some(e) = window.next() {
 
