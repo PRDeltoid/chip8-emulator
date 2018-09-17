@@ -14,13 +14,16 @@ Their decimal equivalence and purpose should be noted in the comments or via con
 
 To extract nibbles as individual numbers, we mask the nibble and then rotate that nibble to the right until it is in the "1"s place
 ************/
+#![feature(duration_as_u128)]
 extern crate piston_window;
 extern crate rand;
 
-use std::io::prelude::*;
+
 use std::fs::File;
 use std::ops::Range;
 use std::io::{stdin, stdout, Read, Write};
+use std::time::Duration;
+use std::thread::sleep;
 
 use piston_window::*;
 
@@ -33,16 +36,13 @@ const LAST_TWO_MASK: u16 = 0x00FF;      //Grabs the last two nibbles
 const LAST_THREE_MASK: u16 = 0x0FFF;    //Grabs last three nibbles only
 
 pub struct Chip8 {
-    _opcode: u16,        //Opcode
     memory: [u8; 4096], //General purpose memory
     v: [u8; 16],        //General purpose registers. Register 16 is the "carry flag"
-    vf: u8,             //Carry flag
 
     i: u16,             //Index register
     pc: u16,            //Program counter (instruction pointer)
 
     screen: [u8; 64 * 32], //Array for storing screen pixels. Screen is 64 x 32 pixels
-    //draw_screen: Screen,
     draw_flag: bool,
 
     delay_timer: u8,    //Counts down at 60Hz speed to zero
@@ -51,16 +51,14 @@ pub struct Chip8 {
     stack: [u16; 16],   //Stack for program execution. Use to return to calling program after called program is finished
     sp: u16,            //Stack pointer, to keep track of what is currently the "top"
 
-    _key: [u8; 16],     //Hex based keypad
+    key: [u8; 16],     //Hex based keypad
 }
 
 impl Chip8 {
     pub fn new() -> Chip8 {
         Chip8 {
-            _opcode: 0,         //Blank opcode
             memory: [0; 4096], //Initialize our memory
             v: [0; 16],        //Zero out our registers
-            vf: 0,
             i: 0,
             pc: 512,           //program counter starts at 0x200 (system data comes before)
             screen: [0; 64 * 32],
@@ -69,7 +67,7 @@ impl Chip8 {
             sound_timer: 0,
             stack: [0; 16],
             sp: 0,
-            _key: [0; 16],
+            key: [0; 16],
         }
     }
 
@@ -92,8 +90,11 @@ impl Chip8 {
             //Prevent malformed font file from overwriting program data
             if i >= 512 { break; }
         }
+    }
 
-
+    pub fn set_key(&mut self, key: u8, value: u8) {
+        self.key[key as usize] = value;
+        println!("key {} set to {}", key, value);
     }
 
     //Loads a ROM into memory starting at location 0x0200
@@ -126,8 +127,8 @@ impl Chip8 {
 
     fn draw(&mut self, window: &mut PistonWindow, event: &Event) {
         let pixel_size = 8.0; // self.pixel_size as f64;
-        let y_size = 32; //self.y_size as usize;
         let x_size = 64; //self.x_size as usize;
+        let y_size = 32; //self.y_size as usize;
         window.draw_2d(event, |c, g| {
 
             //Step over each x "pixel"
@@ -138,7 +139,7 @@ impl Chip8 {
                     if self.screen[x + (y * x_size as usize)] == 1 {
                         let x_pos = x as f64 * pixel_size;
                         let y_pos = y as f64 * pixel_size;
-                        println!("Drawing rect at x:{}, y:{}", x_pos, y_pos);
+                        //println!("Drawing rect at x:{}, y:{}", x_pos, y_pos);
                         Rectangle::new([1.0, 1.0, 1.0, 1.0])
                             .draw([x_pos, y_pos, pixel_size, pixel_size], &c.draw_state, c.transform, g)
                     }
@@ -159,7 +160,7 @@ impl Chip8 {
         let opcode = self.read_opcode();
 
         //Print opcode as a 6-digit hex number, including leading zeros and "0x" notation.
-        println!("Opcode: {:#06X}", opcode); //ie 0x0012
+        print!("Opcode: {:#06X} - ", opcode); //ie 0x0012
 
         //Decode and execute opcode
         //Check our first hex digit (nibble)
@@ -175,7 +176,7 @@ impl Chip8 {
                     },
                     //0x00EE opcode (return from sub-process)
                     0x000E => {
-                        println!("Return");
+                        println!("Returning to {}", self.stack[self.sp as usize]);
                         //Set program counter to the address at the top of the stack
                         self.pc = self.stack[self.sp as usize];
                         //Move the stack pointer down one to "pop" the previous stack information
@@ -191,60 +192,60 @@ impl Chip8 {
             },
             //0x2NNN opcode (call subroutine: push pc to stack, jmp nnn)
             0x2000 => {
+                println!("Call routine at {:#04X}", self.pc);
                 //Move stack pointer up one because we are "pushing" data in
                 self.sp += 1;
                 //Push the current program counter into the stack at the "top"
                 self.stack[self.sp as usize] = self.pc;
                 //Jump to address NNN
                 self.pc = opcode & LAST_THREE_MASK;
-                println!("Jumping to {:}d", self.pc);
             },
             //0x3XKK opcode (Skp next instruction if Vx == kk)
             0x3000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
+                println!("SE V[{}], {}", x, kk);
                 if self.v[x] == kk {
                     //Skip next instruction by adding 2 to the program counter (skipping 2 bytes or 1 opcode)
                     self.next_instruction();
                 }
                 self.next_instruction();
-                println!("SE V[{}], {}", x, kk)
             },
             //0x4XKK opcode (Skp next instruction if Vx != kk)
             0x4000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
+                println!("SNE V[{}], {}", x, kk);
                 if self.v[x] != kk {
                     //Skip next instruction by adding 2 to the program counter (skipping 2 bytes or 1 opcode)
                     self.next_instruction();
                 }
                 self.next_instruction();
-                println!("SNE V[{}], {}", x, kk)
             },
             //0x5XY0 (Skp next instruction if Vx == Vy)
             0x5000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
+                println!("SE V[{}], V[{}]", x, y);
                 if self.v[x] == self.v[y] {
                     self.next_instruction();
                 }
                 self.next_instruction();
-                println!("SE V[{}], V[{}]", x, y)
             },
             //0x6XKK (Load Vx with kk)
             0x6000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
-                self.v[x] = kk;
                 println!("Load V[{}] with {}", x, kk);
+                self.v[x] = kk;
                 self.next_instruction();
             },
             //0x7XKK (Add Vx, kk)
             0x7000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
-                self.v[x] += kk;
                 println!("Add V[{}] with {}", x, kk);
+                self.v[x] += kk;
                 self.next_instruction();
             },
             //0x8XYN (Vx/Vy operations)
@@ -255,61 +256,70 @@ impl Chip8 {
                 match opcode & FOURTH_NIBBLE_MASK  {
                     //0x8XY0 (MOV v[x], v[y])
                     0x0000 => {
+                        println!("Mov V[{}], V[{}]", x, y);
                         self.v[x] = self.v[y];
                     },
                     //0x8XY1 (OR v[x], v[y])
                     0x0001 => {
+                        println!("Or V[{}], V[{}]", x, y);
                         self.v[x] = self.v[x] | self.v[y];
                     },
                     //0x8XY2 (AND v[x], v[y])
                     0x0002 => {
+                        println!("And V[{}], V[{}]", x, y);
                         self.v[x] = self.v[x] & self.v[y];
                     },
                     //0x8XY3 (XOR v[x], v[y])
                     0x0003 => {
+                        println!("Xor V[{}], V[{}]", x, y);
                         self.v[x] = self.v[x] ^ self.v[y];
                     },
                     //0x8XY4 (ADD v[x], v[y])
                     0x0004 => {
+                        println!("Add V[{}], V[{}]", x, y);
                         //Set carry if addition goes over 8 bits
                         if (self.v[x] + self.v[y]) >= 255  {
-                            self.vf = 1;
+                            self.v[0x0f] = 1;
                         } else {
-                            self.vf = 0;
+                            self.v[0x0f] = 0;
                         }
                         self.v[x] = ((self.v[x] + self.v[y]) & LAST_TWO_MASK as u8) as u8; //only store lowest 8 bits, no matter what
                     },
                     //0x8XY5 (SUB v[x], v[y])
                     0x0005 => {
+                        println!("Sub V[{}], V[{}]", x, y);
                         if self.v[x] > self.v[y] {
-                            self.vf = 1;
+                            self.v[0x0f] = 1;
                         } else {
-                            self.vf = 0;
+                            self.v[0x0f] = 0;
                         }
                         self.v[x] = self.v[x] - self.v[y];
                     },
                     //0x8XY6 (SHR v[x], 1)
                     0x0006 => {
+                        println!("Shift Right V[{}], 1", x);
                         //If Most Significant Bit is 1, set VF to 1
                         if(opcode & 0b1000_0000) == 0b1000_0000 {
-                            self.vf = 1;
+                            self.v[0x0f] = 1;
                         }
                         self.v[x] = self.v[x] >> 1;
                     },
                     //0x8XY7 (SUBN v[x], v[y])
                     0x0007 => {
+                        println!("Subn V[{}], V[{}]", x, y);
                         if self.v[y] > self.v[x] {
-                            self.vf = 1;
+                            self.v[0x0f] = 1;
                         } else {
-                            self.vf = 0;
+                            self.v[0x0f] = 0;
                         }
                         self.v[x] = self.v[x] - self.v[y];
                     },
                     //0x8XY6 (SHL v[x], 1)
                     0x000E => {
+                        println!("Shift Left V[{}], 1", x);
                         //If Least Significant Bit is 1, set VF to 1
                         if (opcode & 0b0000_0001) == 0b0000_0001 {
-                            self.vf = 1;
+                            self.v[0x0f] = 1;
                         }
                         self.v[x] = self.v[x] << 1;
                     },
@@ -322,6 +332,8 @@ impl Chip8 {
             0x9000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
+
+                println!("SNE V[{}], V[{}]", x, y);
                 if self.v[x] != self.v[y] {
                     self.next_instruction();
                 }
@@ -330,11 +342,12 @@ impl Chip8 {
             //0xANNN opcode (mv i, NNN)
             0xA000 => {
                 self.i = opcode & LAST_THREE_MASK;
+                println!("Changing index to {:}d", self.i);
                 self.next_instruction();
-                println!("Changing index to {:}d", self.i)
             },
             //0xBNNN opcode (jmp NNN + V0)
             0xB000 => {
+                println!("Jmp NNN + V[0]");
                 self.pc = (opcode & LAST_THREE_MASK) + self.v[0] as u16;
             },
             //0xCXNN opcode (rnd Vx, byte AND NN)
@@ -343,7 +356,7 @@ impl Chip8 {
                 let n = opcode & LAST_TWO_MASK;
                 let rand = rand::random::<u16>();
 
-                println!("n: {}, x: {}, rand: {}", n, x, rand);
+                println!("v[{}] = n: {} & {}", x, n, rand);
                 self.v[x as usize] = (rand & n) as u8;
                 self.next_instruction();
 
@@ -360,7 +373,7 @@ impl Chip8 {
                 //Unset our collision flag
                 self.v[0x0F] = 0;
 
-                println!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
+                print!("Draw Sprite starting at mem[{}] at loc x:{}, y:{} with height:{}", self.i, x, y, height);
 
                 //Holds the current pixel data
                 let mut pixel_line: u8;
@@ -374,6 +387,13 @@ impl Chip8 {
                         //If the current bit is set...
                         if (pixel_line >> xline) & 0b00000001 != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
                             //Check for pixel collision
+                            let index: usize = x + xline + ((y + yline) * 64);
+
+                            if index >= 2048 {
+                                //break;
+                                continue;
+                            }
+
                             if self.screen[x + xline + ((y + yline) * 64)] == 1 {
                                 //If there is a collision, set the collision register VF to 1
                                 self.v[0xF] = 1;
@@ -393,16 +413,16 @@ impl Chip8 {
                     //0xEx9E Skip next instruct if key with value of Vx is pressed
                     0x009E => {
                         let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
-                        println!("x : {}", x);
+                        println!("SN if Key[{}] is pressed", x);
                     },
                     //0xEx9E Skip next instruct if key with value of Vx is not pressed
                     0x00A1 => {
                         let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
-                        println!("x : {}", x);
+                        println!("SN if Key[{}] is not pressed", x);
 
                     },
                     _ => {
-                        println!("Unknown opcode found");
+                        println!("Unknown 0xE000 opcode");
                     }
                 }
             },
@@ -412,6 +432,7 @@ impl Chip8 {
                 match opcode & LAST_TWO_MASK  {
                     //0xFX07 (mv v[x], delay_timer)
                     0x0007 => {
+                        println!("Mv v[{}], delay_timer", x);
                         self.v[x] = self.delay_timer;
                         self.next_instruction();
                     },
@@ -419,20 +440,23 @@ impl Chip8 {
                     //All execution stops until a key is pressed
                     0x000A => {
                         let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
-                        println!("x : {}", x);
+                        println!("Wait for key press {}", self.v[x as usize]);
                     },
                     //0xFX15 (mov delay_timer, v[x])
                     0x0015 => {
-                        self.delay_timer  = self.v[x];
+                        println!("Mov delay_timer, v[{}]", x);
+                        self.delay_timer = self.v[x];
                         self.next_instruction();
                     },
                     //0xFX18 (mov sound_timer, v[x])
                     0x0018 => {
+                        println!("Mov sound_timer, v[{}]", x);
                         self.sound_timer = self.v[x];
                         self.next_instruction();
                     },
                     //0xFX1E (add i, v[x])
                     0x001E => {
+                        println!("Add v[{}] to index", x);
                         self.i += self.v[x] as u16;
                         self.next_instruction();
                     },
@@ -487,8 +511,8 @@ impl Chip8 {
 
         if self.draw_flag == true {
             //Draw the screen
-            println!("Draw Screen");
             self.draw(window, event);
+            //println!("Draw Screen");
 
             //Unset our draw flag for the next op
             self.draw_flag = false;
@@ -512,6 +536,29 @@ fn pause() {
     stdin().read(&mut [0]).unwrap();
 }
 
+fn key_translator(button: Button) -> u8 {
+    match button {
+        Button::Keyboard(Key::D1) => 0,
+        Button::Keyboard(Key::D2) => 1,
+        Button::Keyboard(Key::D3) => 2,
+        Button::Keyboard(Key::D4) => 3,
+        Button::Keyboard(Key::Q) => 4,
+        Button::Keyboard(Key::W) => 5,
+        Button::Keyboard(Key::E) => 7,
+        Button::Keyboard(Key::R) => 8,
+        Button::Keyboard(Key::A) => 9,
+        Button::Keyboard(Key::S) => 0x0A,
+        Button::Keyboard(Key::D) => 0x0B,
+        Button::Keyboard(Key::F) => 0x0C,
+        Button::Keyboard(Key::Z) => 0x0D,
+        Button::Keyboard(Key::X) => 0x0E,
+        Button::Keyboard(Key::C) => 0x0F,
+        Button::Keyboard(Key::V) => 0x10,
+        _ => 255,
+    }
+
+}
+
 fn main() {
     let height: u32 = 64 * 8; //x_size as u32 * pixel_size as u32;
     let width: u32 = 32 * 8; //y_size as u32 * pixel_size as u32;
@@ -524,6 +571,8 @@ fn main() {
     .build()
     .unwrap();
 
+    //Update screen, even when no input is given
+    //This makes sure our emulation cycle (which is tied to game loop) keeps running
     window.set_lazy(false);
 
     //Create and initialize our Chip8 object
@@ -532,12 +581,30 @@ fn main() {
 
     //Load up our font into reserved system memory
     chip8.load_font("font.c8");
-    //chip8.print_memory(0..100); //Check to see if the fonts are loaded
 
     //Load up our ROM into program memory
-    chip8.load_rom("maze.ch8");
+    chip8.load_rom("Maze.ch8");
 
     while let Some(e) = window.next() {
+
+        //Set/unset keys
+        if let Some(button) = e.button_args() {
+            //Key translation (1234, qwer, asdf, zxcv hex keyboard)
+            let key = key_translator(button.button);
+
+            let state = match button.state {
+                ButtonState::Press => 1,
+                ButtonState::Release => 0,
+            };
+
+            //If a key was pressed, set its state
+            if key != 255 {
+                chip8.set_key(key, state);
+            } else {
+                println!("Unknown key");
+            }
+        };
+
         //While the program counter is within an acceptable range...
         if chip8.pc > 4096 {
             println!("Accessing invalid memory, aborting");
@@ -545,8 +612,11 @@ fn main() {
         }
         //Emulate a CPU cycle
         chip8.emulate_cycle(&mut window, &e);
-        //Pause after execution to observe the state of the screen
-        //pause();
+
+        //Since we emulate WAYYY fast, sleep for 16ms to make it about 60Hz emulation speed
+        sleep(Duration::from_millis(16));
     }
+    //Pause after execution to observe the state of the screen
+    pause();
 
 }
