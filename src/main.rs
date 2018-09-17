@@ -21,9 +21,7 @@ extern crate rand;
 
 use std::fs::File;
 use std::ops::Range;
-use std::io::{stdin, stdout, Read, Write};
-use std::time::Duration;
-use std::thread::sleep;
+use std::io::Read;
 use std::env;
 
 use piston_window::*;
@@ -150,6 +148,8 @@ impl Chip8 {
 
         //Clear old screen
         self.clear(window, event);
+
+        //Draw new screen
         window.draw_2d(event, |c, g| {
 
             //Step over each y "pixel" for each x above
@@ -500,6 +500,7 @@ impl Chip8 {
                     },
                     0x0029 => {
                         println!("Set I = location of sprite for digit Vx");
+                        self.i = self.v[x] as u16 * 5;
                         self.next_instruction();
                     },
                     0x0033 => {
@@ -566,14 +567,6 @@ impl Chip8 {
     }
 }
 
-//Simple system("pause") equivalent in Rust.
-fn pause() {
-    let mut stdout = stdout();
-    stdout.write(b"Press Enter to continue...").unwrap();
-    stdout.flush().unwrap();
-    stdin().read(&mut [0]).unwrap();
-}
-
 fn key_translator(button: Button) -> u8 {
     match button {
         Button::Keyboard(Key::D1) => 1,
@@ -633,6 +626,7 @@ fn main() {
 
     while let Some(e) = window.next() {
 
+        //Always draw the screen
         chip8.draw(&mut window, &e);
 
         //Set/unset keys
@@ -658,11 +652,5 @@ fn main() {
         }
         //Emulate a CPU cycle
         chip8.emulate_cycle();
-
-        //Since we emulate WAYYY fast, sleep for 16ms to make it about 60Hz emulation speed
-        sleep(Duration::from_millis(16));
     }
-    //Pause after execution to observe the state of the screen
-    pause();
-
 }
