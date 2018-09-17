@@ -205,7 +205,7 @@ impl Chip8 {
             0x3000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
-                println!("SE V[{}], {}", x, kk);
+                println!("SE V[{}] ({}), {}", x, self.v[x], kk);
                 if self.v[x] == kk {
                     //Skip next instruction by adding 2 to the program counter (skipping 2 bytes or 1 opcode)
                     self.next_instruction();
@@ -216,7 +216,7 @@ impl Chip8 {
             0x4000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
-                println!("SNE V[{}], {}", x, kk);
+                println!("SNE V[{}] ({}), {}", x, self.v[x], kk);
                 if self.v[x] != kk {
                     //Skip next instruction by adding 2 to the program counter (skipping 2 bytes or 1 opcode)
                     self.next_instruction();
@@ -227,7 +227,7 @@ impl Chip8 {
             0x5000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
-                println!("SE V[{}], V[{}]", x, y);
+                println!("SE V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                 if self.v[x] == self.v[y] {
                     self.next_instruction();
                 }
@@ -237,7 +237,7 @@ impl Chip8 {
             0x6000 => {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let kk = (opcode & LAST_TWO_MASK) as u8;
-                println!("Load V[{}] with {}", x, kk);
+                println!("Load V[{}] ({}) with {}", x, self.v[x], kk);
                 self.v[x] = kk;
                 self.next_instruction();
             },
@@ -258,29 +258,29 @@ impl Chip8 {
                 match opcode & FOURTH_NIBBLE_MASK  {
                     //0x8XY0 (MOV v[x], v[y])
                     0x0000 => {
-                        println!("Mov V[{}], V[{}]", x, y);
+                        println!("Mov V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         self.v[x] = self.v[y];
                     },
                     //0x8XY1 (OR v[x], v[y])
                     0x0001 => {
-                        println!("Or V[{}], V[{}]", x, y);
+                        println!("Or V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         self.v[x] = self.v[x] | self.v[y];
                     },
                     //0x8XY2 (AND v[x], v[y])
                     0x0002 => {
-                        println!("And V[{}], V[{}]", x, y);
+                        println!("And V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         self.v[x] = self.v[x] & self.v[y];
                     },
                     //0x8XY3 (XOR v[x], v[y])
                     0x0003 => {
-                        println!("Xor V[{}], V[{}]", x, y);
+                        println!("Xor V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         self.v[x] = self.v[x] ^ self.v[y];
                     },
                     //0x8XY4 (ADD v[x], v[y])
                     0x0004 => {
-                        println!("Add V[{}], V[{}]", x, y);
+                        println!("Add V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         //Set carry if addition goes over 8 bits
-                        if (self.v[x] + self.v[y]) >= 255  {
+                        if (self.v[x] as u16 + self.v[y] as u16) >= 255  {
                             self.v[0x0f] = 1;
                         } else {
                             self.v[0x0f] = 0;
@@ -289,7 +289,7 @@ impl Chip8 {
                     },
                     //0x8XY5 (SUB v[x], v[y])
                     0x0005 => {
-                        println!("Sub V[{}], V[{}]", x, y);
+                        println!("Sub V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         if self.v[x] > self.v[y] {
                             self.v[0x0f] = 1;
                         } else {
@@ -299,7 +299,7 @@ impl Chip8 {
                     },
                     //0x8XY6 (SHR v[x], 1)
                     0x0006 => {
-                        println!("Shift Right V[{}], 1", x);
+                        println!("Shift Right V[{}] ({}), 1", x, self.v[x]);
                         //If Most Significant Bit is 1, set VF to 1
                         if(opcode & 0b1000_0000) == 0b1000_0000 {
                             self.v[0x0f] = 1;
@@ -308,7 +308,7 @@ impl Chip8 {
                     },
                     //0x8XY7 (SUBN v[x], v[y])
                     0x0007 => {
-                        println!("Subn V[{}], V[{}]", x, y);
+                        println!("Subn V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         if self.v[y] > self.v[x] {
                             self.v[0x0f] = 1;
                         } else {
@@ -318,7 +318,7 @@ impl Chip8 {
                     },
                     //0x8XY6 (SHL v[x], 1)
                     0x000E => {
-                        println!("Shift Left V[{}], 1", x);
+                        println!("Shift Left V[{}] ({}), 1", x, self.v[x]);
                         //If Least Significant Bit is 1, set VF to 1
                         if (opcode & 0b0000_0001) == 0b0000_0001 {
                             self.v[0x0f] = 1;
@@ -335,7 +335,7 @@ impl Chip8 {
                 let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
                 let y = ((opcode & THIRD_NIBBLE_MASK) >> 4) as usize;
 
-                println!("SNE V[{}], V[{}]", x, y);
+                println!("SNE V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                 if self.v[x] != self.v[y] {
                     self.next_instruction();
                 }
@@ -358,7 +358,7 @@ impl Chip8 {
                 let n = opcode & LAST_TWO_MASK;
                 let rand = rand::random::<u16>();
 
-                println!("v[{}] = n: {} & {}", x, n, rand);
+                println!("V[{}] ({}) = n: {} & {}", x, self.v[x as usize], n, rand);
                 self.v[x as usize] = (rand & n) as u8;
                 self.next_instruction();
 
@@ -441,7 +441,7 @@ impl Chip8 {
                 match opcode & LAST_TWO_MASK  {
                     //0xFX07 (mv v[x], delay_timer)
                     0x0007 => {
-                        println!("Mv v[{}], delay_timer", x);
+                        println!("Mv V[{}] ({}), delay_timer", x, self.v[x]);
                         self.v[x] = self.delay_timer;
                         self.next_instruction();
                     },
@@ -453,19 +453,19 @@ impl Chip8 {
                     },
                     //0xFX15 (mov delay_timer, v[x])
                     0x0015 => {
-                        println!("Mov delay_timer, v[{}]", x);
+                        println!("Mov delay_timer, V[{}] ({})", x, self.v[x]);
                         self.delay_timer = self.v[x];
                         self.next_instruction();
                     },
                     //0xFX18 (mov sound_timer, v[x])
                     0x0018 => {
-                        println!("Mov sound_timer, v[{}]", x);
+                        println!("Mov sound_timer, V[{}] ({})", x, self.v[x]);
                         self.sound_timer = self.v[x];
                         self.next_instruction();
                     },
                     //0xFX1E (add i, v[x])
                     0x001E => {
-                        println!("Add v[{}] to index", x);
+                        println!("Add V[{}] ({}) to index", x, self.v[x]);
                         self.i += self.v[x] as u16;
                         self.next_instruction();
                     },
@@ -484,7 +484,7 @@ impl Chip8 {
                         self.next_instruction();
                     },
                     0x0055 => {
-                        println!("Stores registers V0 through Vx in memory starting at location I");
+                        println!("Stores registers V0 through V{} in memory starting at location {:#06X}", x, self.i);
                         for n in 0..x {
                            self.memory[self.i as usize + n] = self.v[n];
                         }
@@ -592,7 +592,7 @@ fn main() {
     chip8.load_font("font.c8");
 
     //Load up our ROM into program memory
-    chip8.load_rom("TetrisDemo.ch8");
+    chip8.load_rom("Particle.ch8");
 
     while let Some(e) = window.next() {
 
