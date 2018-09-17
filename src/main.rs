@@ -567,8 +567,14 @@ impl Chip8 {
     }
 }
 
-fn key_translator(button: Button) -> u8 {
-    match button {
+fn key_translator(button: ButtonArgs) -> Result<(u8, u8), String> {
+
+    let state = match button.state {
+        ButtonState::Press => 1,
+        ButtonState::Release => 0,
+    };
+
+    let key = match button.button {
         Button::Keyboard(Key::D1) => 1,
         Button::Keyboard(Key::D2) => 2,
         Button::Keyboard(Key::D3) => 3,
@@ -586,8 +592,14 @@ fn key_translator(button: Button) -> u8 {
         Button::Keyboard(Key::C) => 0x0B,
         Button::Keyboard(Key::V) => 0x0F,
         _ => 255,
+    };
+
+    if key == 255 {
+        return Err(String::from("Unknown key"));
     }
 
+
+    Ok((key, state))
 }
 
 fn main() {
@@ -632,16 +644,9 @@ fn main() {
         //Set/unset keys
         if let Some(button) = e.button_args() {
             //Key translation (1234, qwer, asdf, zxcv hex keyboard)
-            let key = key_translator(button.button);
-
-            let state = match button.state {
-                ButtonState::Press => 1,
-                ButtonState::Release => 0,
-            };
-
-            //If a key was pressed, set its state
-            if key != 255 && chip8.key[key as usize] != state {
-                chip8.set_key(key, state);
+            match key_translator(button) {
+                Ok((key, state)) => chip8.set_key(key, state),
+                Err(err) => println!("{}", err)
             }
         };
 
