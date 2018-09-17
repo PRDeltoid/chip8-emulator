@@ -280,12 +280,12 @@ impl Chip8 {
                     0x0004 => {
                         println!("Add V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         //Set carry if addition goes over 8 bits
-                        if (self.v[x] as u16 + self.v[y] as u16) >= 255  {
+                        let (_, overflow) = self.v[x].overflowing_add(self.v[y]);
+                        if overflow {
                             self.v[0x0f] = 1;
                         } else {
                             self.v[0x0f] = 0;
                         }
-                        self.v[x] = ((self.v[x] + self.v[y]) & LAST_TWO_MASK as u8) as u8; //only store lowest 8 bits, no matter what
                     },
                     //0x8XY5 (SUB v[x], v[y])
                     0x0005 => {
