@@ -24,6 +24,7 @@ use std::ops::Range;
 use std::io::{stdin, stdout, Read, Write};
 use std::time::Duration;
 use std::thread::sleep;
+use std::env;
 
 use piston_window::*;
 
@@ -72,6 +73,8 @@ impl Chip8 {
     }
 
     pub fn initialize(&mut self) {
+        //Load up our font into reserved system memory
+        self.load_font();
     }
 
     //Increments the program counter to pull the next opcode
@@ -80,15 +83,30 @@ impl Chip8 {
     }
 
     //Loads font sprites into memory starting at location 0x0000 to 0x01FF
-    pub fn load_font(&mut self, font_path: &str) {
-        let font = File::open(font_path).unwrap();
+    pub fn load_font(&mut self) {
+        let font = [
+            0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+            0x20, 0x60, 0x20, 0x20, 0x70, // 1
+            0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+            0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+            0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+            0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+            0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+            0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+            0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+            0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+            0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+            0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+            0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+            0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+            0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+            0xF0, 0x80, 0xF0, 0x80, 0x80, // F
+        ];
         let mut i = 0;
 
-        for byte in font.bytes() {
-            self.memory[i] = byte.unwrap();
+        for byte in font.iter() {
+            self.memory[i] = *byte;
             i += 1;
-            //Prevent malformed font file from overwriting program data
-            if i >= 512 { break; }
         }
     }
 
@@ -125,21 +143,26 @@ impl Chip8 {
         opcode
     }
 
-    fn draw(&mut self, window: &mut PistonWindow, event: &Event) {
-        let pixel_size = 8.0; // self.pixel_size as f64;
-        let x_size = 64; //self.x_size as usize;
-        let y_size = 32; //self.y_size as usize;
+    pub fn draw(&mut self, window: &mut PistonWindow, event: &Event) {
+        let pixel_size = 8.0;
+        let x_size = 64;
+        let y_size = 32;
+
+        //Clear old screen
+        self.clear(window, event);
         window.draw_2d(event, |c, g| {
 
-            //Step over each x "pixel"
-            for x in 0..x_size as usize {
-                //Step over each y "pixel" for each x above
-                for y in 0..y_size as usize {
+            //Step over each y "pixel" for each x above
+            for y in 0..y_size as usize {
+                //Step over each x "pixel"
+                for x in 0..x_size as usize {
                     //If the screen contains a 1 at the current pixel...
-                    if self.screen[x + (y * x_size as usize)] == 1 {
+                    let index = x + (y * x_size as usize);
+                    if self.screen[index] == 1 {
+                        //println!("Found sprite at x:{} y:{} (index: {})", x, y, index);
                         let x_pos = x as f64 * pixel_size;
                         let y_pos = y as f64 * pixel_size;
-                        //println!("Drawing rect at x:{}, y:{}", x_pos, y_pos);
+                        //println!("Drawing rect at x:{} ({}), y:{} ({})", x_pos, x, y_pos, y);
                         Rectangle::new([1.0, 1.0, 1.0, 1.0])
                             .draw([x_pos, y_pos, pixel_size, pixel_size], &c.draw_state, c.transform, g)
                     }
@@ -154,8 +177,12 @@ impl Chip8 {
         });
     }
 
+    fn clear_screenbuf(&mut self) {
+        self.screen = [0; 64 * 32];
+    }
+
     //Pulls the current opcode in memory (at program counter) and performs it's required operations
-    pub fn emulate_cycle(&mut self, window: &mut PistonWindow, event: &Event) {
+    pub fn emulate_cycle(&mut self) {
         //Fetch opcode
         let opcode = self.read_opcode();
 
@@ -171,7 +198,7 @@ impl Chip8 {
                     //0x0000 opcode (clear screen)
                     0x0000 => {
                         println!("Clear Screen");
-                        self.clear(window, event);
+                        self.clear_screenbuf();
                         self.next_instruction();
                     },
                     //0x00EE opcode (return from sub-process)
@@ -247,7 +274,7 @@ impl Chip8 {
                 let kk = (opcode & LAST_TWO_MASK) as u16;
                 println!("Add V[{}] ({}) with {}", x, self.v[x], kk);
                 //Add and keep only the last byte by masking.
-                self.v[x] = (((self.v[x] as u16) + kk) & 0x00FF) as u8;
+                self.v[x] = (self.v[x] as u16).overflowing_add(kk).0 as u8;
                 self.next_instruction();
             },
             //0x8XYN (Vx/Vy operations)
@@ -280,7 +307,8 @@ impl Chip8 {
                     0x0004 => {
                         println!("Add V[{}] ({}), V[{}] ({})", x, self.v[x], y, self.v[y]);
                         //Set carry if addition goes over 8 bits
-                        let (_, overflow) = self.v[x].overflowing_add(self.v[y]);
+                        let (new_value, overflow) = self.v[x].overflowing_add(self.v[y]);
+                        self.v[x] = new_value;
                         if overflow {
                             self.v[0x0f] = 1;
                         } else {
@@ -295,7 +323,7 @@ impl Chip8 {
                         } else {
                             self.v[0x0f] = 0;
                         }
-                        self.v[x] = self.v[x] - self.v[y];
+                        self.v[x] = self.v[x].overflowing_sub(self.v[y]).0;
                     },
                     //0x8XY6 (SHR v[x], 1)
                     0x0006 => {
@@ -314,7 +342,7 @@ impl Chip8 {
                         } else {
                             self.v[0x0f] = 0;
                         }
-                        self.v[x] = self.v[x] - self.v[y];
+                        self.v[x] = self.v[y].overflowing_sub(self.v[x]).0;
                     },
                     //0x8XY6 (SHL v[x], 1)
                     0x000E => {
@@ -365,6 +393,9 @@ impl Chip8 {
             }
             //0xDxyn opcode
             0xD000 => {
+                //Tell the screen that it has to refresh after this operation
+                self.draw_flag = true;
+
                 //X Coord to draw at
                 let x = self.v[((opcode & SECOND_NIBBLE_MASK) >> 8) as usize] as usize;
                 //Y Coord to draw at
@@ -387,26 +418,24 @@ impl Chip8 {
                     //For each pixel (bit) in the line... (always width of 8, remember!)
                     for xline in 0..8 {
                         //If the current bit is set...
-                        if (pixel_line >> xline) & 0b00000001 != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
-                            //Check for pixel collision
-                            let index: usize = x + xline + ((y + yline) * 64);
+                        if (pixel_line >> (7 - xline)) & 0b00000001 != 0 { //this hack separates each bit in the pixel line by masking it and then rotating the bits to the right until they are in the 1s place
 
+                            let index: usize =  x + xline + ((y + yline) * 64);
                             if index >= 2048 {
                                 //break;
                                 continue;
                             }
 
-                            if self.screen[x + xline + ((y + yline) * 64)] == 1 {
+                            //Check for pixel collision
+                            if self.screen[index] == 1 {
                                 //If there is a collision, set the collision register VF to 1
                                 self.v[0xF] = 1;
                             }
                             //Set the value of the line by XORing our sprite's current line onto it
-                            self.screen[x + xline + ((y + yline) * 64)] ^= 1;
+                            self.screen[index] ^= 1;
                         }
                     }
                 }
-                //Tell the screen that it has to refresh after this operation
-                self.draw_flag = true;
                 self.next_instruction();
             },
             //0xE0NN opcodes
@@ -414,18 +443,18 @@ impl Chip8 {
                 match opcode & LAST_TWO_MASK {
                     //0xEx9E Skip next instruct if key with value of Vx is pressed
                     0x009E => {
-                        let x = ((opcode & THIRD_NIBBLE_MASK) >> 8) as usize;
-                        println!("SN if Key[{}] is pressed", x);
-                        if self.key[x] == 1 {
+                        let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                        println!("SN if Key[{}] (v={}) is pressed", self.v[x], x);
+                        if self.key[self.v[x] as usize] == 1 {
                             self.next_instruction();
                         }
                         self.next_instruction();
                     },
                     //0xEx9E Skip next instruct if key with value of Vx is not pressed
                     0x00A1 => {
-                        let x = ((opcode & THIRD_NIBBLE_MASK) >> 8) as usize;
-                        println!("SN if Key[{}] is not pressed", x);
-                        if self.key[x] == 0 {
+                        let x = ((opcode & SECOND_NIBBLE_MASK) >> 8) as usize;
+                        println!("SN if Key[{}] (v={}) is not pressed", self.v[x], x);
+                        if self.key[self.v[x] as usize] == 0 {
                             self.next_instruction();
                         }
                         self.next_instruction();
@@ -519,9 +548,9 @@ impl Chip8 {
         }
 
         if self.draw_flag == true {
+
             //Draw the screen
-            self.draw(window, event);
-            //println!("Draw Screen");
+            //self.draw(window, event);
 
             //Unset our draw flag for the next op
             self.draw_flag = false;
@@ -547,34 +576,45 @@ fn pause() {
 
 fn key_translator(button: Button) -> u8 {
     match button {
-        Button::Keyboard(Key::D1) => 0,
-        Button::Keyboard(Key::D2) => 1,
-        Button::Keyboard(Key::D3) => 2,
-        Button::Keyboard(Key::D4) => 3,
+        Button::Keyboard(Key::D1) => 1,
+        Button::Keyboard(Key::D2) => 2,
+        Button::Keyboard(Key::D3) => 3,
+        Button::Keyboard(Key::D4) => 0x0C,
         Button::Keyboard(Key::Q) => 4,
         Button::Keyboard(Key::W) => 5,
-        Button::Keyboard(Key::E) => 7,
-        Button::Keyboard(Key::R) => 8,
-        Button::Keyboard(Key::A) => 9,
-        Button::Keyboard(Key::S) => 0x0A,
-        Button::Keyboard(Key::D) => 0x0B,
-        Button::Keyboard(Key::F) => 0x0C,
-        Button::Keyboard(Key::Z) => 0x0D,
-        Button::Keyboard(Key::X) => 0x0E,
-        Button::Keyboard(Key::C) => 0x0F,
-        Button::Keyboard(Key::V) => 0x10,
+        Button::Keyboard(Key::E) => 6,
+        Button::Keyboard(Key::R) => 0x0D,
+        Button::Keyboard(Key::A) => 7,
+        Button::Keyboard(Key::S) => 8,
+        Button::Keyboard(Key::D) => 9,
+        Button::Keyboard(Key::F) => 0x0E,
+        Button::Keyboard(Key::Z) => 0x0A,
+        Button::Keyboard(Key::X) => 0,
+        Button::Keyboard(Key::C) => 0x0B,
+        Button::Keyboard(Key::V) => 0x0F,
         _ => 255,
     }
 
 }
 
 fn main() {
-    let height: u32 = 64 * 8; //x_size as u32 * pixel_size as u32;
-    let width: u32 = 32 * 8; //y_size as u32 * pixel_size as u32;
+    //Load rom from arguments
+    let args: Vec<String> = env::args().collect();
+    let romname: &str;
+    if args.len() == 1 {
+        println!("No Romfile given. Aborting");
+        return;
+    } else {
+        romname = &args[1];
+    }
+
+    //screen size
+    let width: u32 = 64 * 8;
+    let height: u32 = 32 * 8;
 
     let mut window: PistonWindow = WindowSettings::new(
         "Chip8",
-        [height, width]
+        [width, height]
     )
     .exit_on_esc(true)
     .build()
@@ -588,13 +628,12 @@ fn main() {
     let mut chip8 = Chip8::new();
     chip8.initialize();
 
-    //Load up our font into reserved system memory
-    chip8.load_font("font.c8");
-
     //Load up our ROM into program memory
-    chip8.load_rom("Particle.ch8");
+    chip8.load_rom(romname);
 
     while let Some(e) = window.next() {
+
+        chip8.draw(&mut window, &e);
 
         //Set/unset keys
         if let Some(button) = e.button_args() {
@@ -607,10 +646,8 @@ fn main() {
             };
 
             //If a key was pressed, set its state
-            if key != 255 {
+            if key != 255 && chip8.key[key as usize] != state {
                 chip8.set_key(key, state);
-            } else {
-                println!("Unknown key");
             }
         };
 
@@ -620,7 +657,7 @@ fn main() {
             return;
         }
         //Emulate a CPU cycle
-        chip8.emulate_cycle(&mut window, &e);
+        chip8.emulate_cycle();
 
         //Since we emulate WAYYY fast, sleep for 16ms to make it about 60Hz emulation speed
         sleep(Duration::from_millis(16));
