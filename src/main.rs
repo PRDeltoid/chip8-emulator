@@ -44,6 +44,9 @@ pub struct Chip8 {
     screen: [u8; 64 * 32], //Array for storing screen pixels. Screen is 64 x 32 pixels
     draw_flag: bool,
 
+    halt_flag: bool,
+    halt_reg: u8,
+
     delay_timer: u8,    //Counts down at 60Hz speed to zero
     sound_timer: u8,    //Same as above, system buzzer sounds when it reaches zero
 
@@ -62,6 +65,8 @@ impl Chip8 {
             pc: 512,           //program counter starts at 0x200 (system data comes before)
             screen: [0; 64 * 32],
             draw_flag: false,
+            halt_flag: false,
+            halt_reg: 0,
             delay_timer: 0,
             sound_timer: 0,
             stack: [0; 16],
@@ -183,6 +188,11 @@ impl Chip8 {
 
     //Pulls the current opcode in memory (at program counter) and performs it's required operations
     pub fn emulate_cycle(&mut self) {
+
+        if self.halt_flag {
+            return;
+        }
+
         //Fetch opcode
         let opcode = self.read_opcode();
 
@@ -478,7 +488,10 @@ impl Chip8 {
                     //All execution stops until a key is pressed
                     0x000A => {
                         let x = (opcode & THIRD_NIBBLE_MASK) >> 8;
-                        println!("Wait for key press {}", self.v[x as usize]);
+                        println!("Wait for key press to store in v[{}]", x);
+                        self.halt_flag = true;
+                        self.halt_reg = x as u8;
+                        self.next_instruction();
                     },
                     //0xFX15 (mov delay_timer, v[x])
                     0x0015 => {
@@ -645,7 +658,13 @@ fn main() {
         if let Some(button) = e.button_args() {
             //Key translation (1234, qwer, asdf, zxcv hex keyboard)
             match key_translator(button) {
-                Ok((key, state)) => chip8.set_key(key, state),
+                Ok((key, state)) => {
+                    chip8.set_key(key, state);
+                    if chip8.halt_flag {
+                        chip8.v[chip8.halt_reg as usize] = key;
+                        chip8.halt_flag = false;
+                    }
+                },
                 Err(err) => println!("{}", err)
             }
         };
